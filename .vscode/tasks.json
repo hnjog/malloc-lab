@@ -1,0 +1,43 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "cppbuild",
+			"label": "C/C++: gcc build active file",
+			"command": "/usr/bin/gcc",
+			"args": [
+				"-fdiagnostics-color=always",
+				"-g",
+				"${file}",
+				"-o",
+				"${fileDirname}/${fileBasenameNoExtension}",
+				"/Zi", // Generates complete debugging information
+				"/MDd", // Use /MDd or /MTd to define _DEBUG and allow _CrtDumpMemoryLeaks()
+				"/EHsc", // Specifies the model of exception handling - mode 'sc'
+				"/Fe:", // Renames the executable file
+			],
+			"options": {
+				"cwd": "${fileDirname}"
+			},
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"detail": "compiler: /usr/bin/gcc"
+		},
+		{
+			"label": "build_mdriver",
+			"command": "make",
+			"args": [""],
+			"type": "shell",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": []
+		}
+	]
+}
