@@ -135,42 +135,83 @@ team_t team = {
 #define GET_SIZE(p) (GET(p) & ~0x7) /* 하위 3비트를 제외한 녀석들이 블록의 크기 비트를 표현한다  */
 #define GET_ALLOC(p) (GET(p) & 0x1)
 
-size_t Get_Size(void* p)
+size_t Get_Size(void *p)
 {
     size_t a = (GET(p) & ~0x7);
 
     return a;
 }
 
+// 헤더 쪽에 위치시킨다
+// 뭔가 혼동된 것 같다
+// 결국 이 녀석들은 Header 다음에 쓰일 놈들이며 size에 포함되지 않는다
+// 따라서 미할당된 블록이라면
+// Header(4) Pred(4) Succ(4) Size Footer(4) 이런 식이고
+// 할당된 녀석들은
+// Header(4) Size Footer(4)
+// 가 된다
+// 따라서 '할당 여부에 따라서'
+// HDRP의 위치가 달라질 위험한 상태이다
+// bp는 size의 시작 부분을 가리키지만
+// '이전 노드 탐색' 이라면 할당 여부를 먼저 확인하는 것이
+// 더 올바른 방식이 될 것이다
+// 현재 노드의 allocated 에 따라서
+// '헤더 노드'를 어떻게 구할지를 알아야 한다
+
 /* Given block ptr bp, compute address of its header and footer */
 #define HDRP(bp) ((char *)(bp)-WSIZE)
 #define FTRP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE)
 
-// 헤더 쪽에 위치시킨다
-// 이 녀석들은 할당된 녀석에는 없어야 한다
-// 어차피 이 녀석들은 할당할 때, bp에 덮어씌워야 하므로 그냥 이 위치에 쓴다
-#define PREDP(bp) ((char *)(bp))
-#define SUCCP(bp) ((char *)(bp) + WSIZE)
+// #define PREDP(bp) ((char *)(bp))
+// #define SUCCP(bp) ((char *)(bp) + WSIZE)
+
+#define BETTER_HDRP(bp) (GET_ALLOC(HDRP(bp)) ? ((char *)(bp)-WSIZE) : ((char *)(bp)-DSIZE - WSIZE))
+
+#define PREDP(bp) ((GET_ALLOC(HDRP(bp)) ? NULL : (char *)(bp) - (2 * WSIZE)))
+#define SUCCP(bp) ((GET_ALLOC(HDRP(bp)) ? NULL : (char *)(bp) - WSIZE))
 
 // 직접 써도 되지만, 실수 방지를 위해 define 설정한다
 #define SET_PREDP(bp, targetP) (PUT(PREDP(bp), targetP))
 #define SET_SUCCP(bp, targetP) (PUT(SUCCP(bp), targetP))
 
+void Set_SuccPtr(void *bp, void *targetP)
+{
+    char *succPtr = SUCCP(bp);
+
+    PUT(succPtr, targetP);
+}
+
+void Set_PredPtr(void *bp, void *targetP)
+{
+    char *predPtr = PREDP(bp);
+
+    PUT(predPtr, targetP);
+}
+
 #define GET_PREDP(bp) (GET(PREDP(bp)))
 #define GET_SUCCP(bp) (GET(SUCCP(bp)))
 
-void* Get_SuccPtr(void* bp)
+void *Get_SuccPtr(void *bp)
 {
-    char* succPtr = SUCCP(bp);
+    void *succPtr = SUCCP(bp);
 
-    void* resultPtr = GET(succPtr);
+    void *resultPtr = GET(succPtr);
+
+    return resultPtr;
+}
+
+void *Get_PredPtr(void *bp)
+{
+    void *predPtr = PREDP(bp);
+
+    void *resultPtr = GET(predPtr);
 
     return resultPtr;
 }
 
 /* Given block ptr bp, compute address of next and previous blocks */
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE((char *)(bp)-WSIZE))
-#define PREV_BLKP(bp) ((char *)(bp)-GET_SIZE((char *)(bp)-DSIZE))
+#define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE((char *)(bp)-DSIZE))
 
 static void *extend_heap(size_t words);
 static void *coalesce(void *bp);
@@ -191,13 +232,13 @@ int mm_init(void)
 
     PUT(heap_listp, 0);                            /* 정렬 패딩 */
     PUT(heap_listp + (1 * WSIZE), PACK(DSIZE, 1)); /* 프롤로그 헤더 */
-    SET_PREDP(heap_listp + (2 * WSIZE), NULL);      //heap_listp + (6 * WSIZE));
-    SET_SUCCP(heap_listp + (2 * WSIZE), NULL);
     PUT(heap_listp + (4 * WSIZE), PACK(DSIZE, 1)); /* 프롤로그 푸터 */
     PUT(heap_listp + (5 * WSIZE), PACK(0, 1));     /* 에필로그 헤더 */
 
     // 할당기의 처음은 에필로그 헤더 너머(원래는 bp가 있어야 하나)를 가리키도록 한다
     heap_listp += (2 * WSIZE);
+    // Set_PredPtr(heap_listp, NULL);
+    // Set_SuccPtr(heap_listp, NULL);
 
     if (extend_heap(CHUNKSIZE / WSIZE) == NULL)
         return -1;
@@ -220,13 +261,7 @@ static void *extend_heap(size_t words)
 
     /* 새로운 가용블록의 헤더랑 푸터랑 초기화해주기 */
     PUT(HDRP(bp), PACK(size, 0));
-    // SET_PREDP(bp, NULL); // 현재 시점 bp이지만 일단 초기화는 해준다
-    // SET_SUCCP(bp, heap_listp);
-    // SET_PREDP(heap_listp,bp);
-
     PUT(FTRP(bp), PACK(size, 0));
-
-    //heap_listp = bp;
 
     /* 새로운 에필로그 헤더 생성*/
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1));
@@ -277,18 +312,14 @@ static void *find_fit(size_t asize)
     /* first fit*/
     void *bp;
 
-    // 정확히는 
-    // list_heap 은 가장 처음의 헤더를 가리켜야 한다
-    // 그렇기에 일단 list_heap자체가
-    // 할당된 블록을 가리키는 일 자체가 없어야 한다
     for (bp = heap_listp;
-     bp != NULL && Get_Size(HDRP(bp)) > 0; 
-     bp = Get_SuccPtr(bp))
+         bp != NULL && Get_Size(HDRP(bp)) > 0;
+         bp = Get_SuccPtr(bp))
     {
         /* 헤더 확인하니 가용 상태, 해당 블록 사이즈가 asize보다 큼 */
         if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp))))
         {
-            arrageBlock(bp); // 할당 되었기에 연결 된 리스트들을 정리한다
+            arrageBlock(bp);
             return bp;
         }
     }
@@ -311,17 +342,23 @@ static void place(void *bp, size_t asize)
         /* 불필요한 할당 인 경우, 잘라낸다 */
         bp = NEXT_BLKP(bp);
         PUT(HDRP(bp), PACK(csize - asize, 0));
-        SET_PREDP(bp,NULL);
-        SET_SUCCP(bp,heap_listp);
-        SET_PREDP(heap_listp,bp);
         PUT(FTRP(bp), PACK(csize - asize, 0));
+
+        Set_PredPtr(bp, NULL);
+        Set_SuccPtr(bp, heap_listp);
+        Set_PredPtr(heap_listp, bp);
+
         heap_listp = bp;
     }
     else /* 할당 사이즈와 시작 블록 사이즈의 차이가, 최소 할당크기보다 작음 */
     {
         PUT(HDRP(bp), PACK(csize, 1));
         PUT(FTRP(bp), PACK(csize, 1));
-        heap_listp = GET_SUCCP(bp); // 이전 bp로 이동한다
+
+        // 현재 할당 리스트의 head가 bp인 경우에만
+        // head를 다음을 가리키는 곳으로 바꿔준다
+        if (bp == heap_listp)
+            heap_listp = Get_SuccPtr(heap_listp);
     }
 }
 
@@ -330,18 +367,28 @@ static void *arrageBlock(void *targetBp)
     // 따라서 해당 블록의 이전은 '다음 블록'의 이전으로 보내고
     // 해당 블록의 '다음'은 '이전 블록'의 다음으로 보낸다
 
-    void* predBp = GET_PREDP(targetBp);
-    void* succBp = GET_SUCCP(targetBp);
+    void *predBp = Get_PredPtr(targetBp);
+    void *succBp = Get_SuccPtr(targetBp);
 
     // 둘 중 하나가 비어 있다면 null이 들어간다
     if (succBp != NULL)
     {
-        SET_PREDP(succBp, predBp);
+        if (GET_ALLOC(HDRP(succBp)) == 0)
+        {
+            Set_PredPtr(succBp, predBp);
+
+            Set_SuccPtr(targetBp, NULL);
+        }
     }
 
     if (predBp != NULL)
     {
-        SET_SUCCP(predBp, succBp);
+        if (GET_ALLOC(HDRP(predBp)) == 0)
+        {
+            Set_SuccPtr(predBp, succBp);
+
+            Set_PredPtr(targetBp, NULL);
+        }
     }
 }
 
@@ -354,9 +401,11 @@ void mm_free(void *bp)
 
     PUT(HDRP(bp), PACK(size, 0));
     PUT(FTRP(bp), PACK(size, 0));
-    // 방금 막 할당 해제된 녀석에서
-    // arrangeBlock으로 해제하면
-    // 값이 이상해지지 않을까?
+    Set_PredPtr(bp, NULL);
+    Set_SuccPtr(bp, heap_listp);
+
+    heap_listp = bp;
+
     coalesce(bp);
 }
 
@@ -366,13 +415,7 @@ static void *coalesce(void *bp)
     size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
     size_t size = GET_SIZE(HDRP(bp));
 
-    if (prev_alloc && next_alloc)
-    {
-        /* case 1 이전과 다음이 모두 할당된 블록이다 */
-
-        //return bp;
-    }
-    else if (prev_alloc && !next_alloc)
+    if (prev_alloc && !next_alloc)
     {
         /* case 2 이전 블록은 할당되었고, 다음 블록은 가용상태 */
         size += GET_SIZE(HDRP(NEXT_BLKP(bp))); /* 다음 블록의 사이즈만큼 더함 (다음 헤더에서 가지고 온다) */
@@ -385,26 +428,27 @@ static void *coalesce(void *bp)
     else if (!prev_alloc && next_alloc)
     {
         /* case 3 이전 블록은 가용 상태, 다음 블록은 할당상태 */
-        size += GET_SIZE(HDRP(PREV_BLKP(bp))); /* 다음 블록의 사이즈만큼 더함 (다음 헤더에서 가지고 온다) */
+        size += GET_SIZE(FTRP(PREV_BLKP(bp))); /* 다음 블록의 사이즈만큼 더함 (다음 헤더에서 가지고 온다) */
         PUT(FTRP(bp), PACK(size, 0));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0)); /* 이전 블록과 자신을 통합해야 하기에, 이전 블록의 헤더에 사이즈 변경 */
+
         arrageBlock(bp);
-        bp = PREV_BLKP(bp);                      /* 이전 블록으로 bp를 옮긴다 */
+        bp = PREV_BLKP(bp); /* 이전 블록으로 bp를 옮긴다 */
     }
     else
     {
         /* case 4 이전 블록과 다음 블록 모두 가용 상태*/
-        size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));
+        size += GET_SIZE(FTRP(PREV_BLKP(bp))) + GET_SIZE(HDRP(NEXT_BLKP(bp)));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0)); /* 다음 블록의 footer에 값을 써줌 */
         arrageBlock(NEXT_BLKP(bp));
         arrageBlock(bp);
-        bp = PREV_BLKP(bp);                      /* 이전 블록으로 bp를 옮긴다 */
+        bp = PREV_BLKP(bp); /* 이전 블록으로 bp를 옮긴다 */
     }
 
-    SET_PREDP(bp,NULL);
-    SET_SUCCP(bp,heap_listp);
-    SET_PREDP(heap_listp,bp);
+    Set_PredPtr(bp, NULL);
+    Set_SuccPtr(bp, heap_listp);
+    Set_PredPtr(heap_listp, bp);
     heap_listp = bp;
 
     return bp;
