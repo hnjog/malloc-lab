@@ -139,8 +139,14 @@ team_t team = {
 #define HDRP(bp) ((char *)(bp)-WSIZE)
 #define FTRP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE)
 
-#define PRED_P(bp) (*(void **)(bp))
-#define SUCC_P(bp) (*(void **)((bp) + WSIZE))
+#define PRED_P(bp) ((char*)(bp))
+#define SUCC_P(bp) ((char*)(bp) + WSIZE)
+
+#define SET_PRED_P(bp,targetBp) (PUT(PRED_P(bp),targetBp))
+#define SET_SUCC_P(bp,targetBp) (PUT(SUCC_P(bp),targetBp))
+
+#define GET_PRED_P(bp) ((void*)(GET(PRED_P(bp))))
+#define GET_SUCC_P(bp) ((void*)(GET(SUCC_P(bp))))
 
 /* Given block ptr bp, compute address of next and previous blocks */
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE((char *)(bp) - WSIZE))
@@ -242,9 +248,9 @@ static void *find_fit(size_t asize)
     void *bp;
 
     
-    for (bp = SUCC_P(heap_listp);   // 시작 : heap_listp가 다음으로 가리키는 블록 (어차피 heap_listp는 프롤로그 헤더의 'PRED'에 존재하고 거기서 head 역할을 해준다)
+    for (bp = GET_SUCC_P(heap_listp);   // 시작 : heap_listp가 다음으로 가리키는 블록 (어차피 heap_listp는 프롤로그 헤더의 'PRED'에 존재하고 거기서 head 역할을 해준다)
      !GET_ALLOC(HDRP(bp));          // 종료조건 : 할당되어 있다면 프롤로그 블록까지 온 상황이므로 종료시킨다
-      bp = SUCC_P(bp))              // bp를 다음 지정된 가용 블록으로 이동시킨다
+      bp = GET_SUCC_P(bp))              // bp를 다음 지정된 가용 블록으로 이동시킨다
     {
         // 할당 안된거라면 사이즈 재본다
         if (asize <= GET_SIZE(HDRP(bp)))
@@ -297,18 +303,18 @@ static void arrageBlock(void *targetBp)
     // 이중 연결 리스트의 정리 과정이다
     // 해당 블록의 이전은 '다음 블록'의 이전으로 보내고
     // 해당 블록의 '다음'은 '이전 블록'의 다음으로 보낸다
-    void *predBp = SUCC_P(targetBp);
-    void *succBp = PRED_P(targetBp);
+    void *predBp = GET_SUCC_P(targetBp);
+    void *succBp = GET_PRED_P(targetBp);
 
     if (predBp != NULL)
     {
-        PRED_P(predBp) = succBp;
+        SET_PRED_P(predBp,succBp);
     }
 
     // 둘 중 하나가 비어 있다면 null이 들어간다
     if (succBp != NULL)
     {
-        SUCC_P(succBp) = predBp;
+        SET_SUCC_P(succBp,predBp);
     }
 }
 
@@ -317,10 +323,10 @@ static void arrageBlock(void *targetBp)
 static void headInsert(void* bp)
 {
     
-    SUCC_P(bp) = SUCC_P(heap_listp);        // 해당 요소의 다음은 heap_listp(head)의 다음으로
-    PRED_P(bp) = heap_listp;                // 해당 요소의 이전을 head로 설정하기
-    PRED_P(SUCC_P(heap_listp)) = bp;        // head가 원래 가리키던 블록의 '이전'을 현재 bp로 설정하고
-    SUCC_P(heap_listp) = bp;                // head의 다음 블록으로 bp 설정하기
+    SET_SUCC_P(bp,GET_SUCC_P(heap_listp));        // 해당 요소의 다음은 heap_listp(head)의 다음으로
+    SET_PRED_P(bp,heap_listp);                // 해당 요소의 이전을 head로 설정하기
+    SET_PRED_P(GET_SUCC_P(heap_listp),bp);        // head가 원래 가리키던 블록의 '이전'을 현재 bp로 설정하고
+    SET_SUCC_P(heap_listp,bp);                // head의 다음 블록으로 bp 설정하기
 }
 
 void mm_free(void *bp)
