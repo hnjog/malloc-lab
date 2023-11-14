@@ -403,18 +403,47 @@ static void *coalesce(void *bp)
  */
 void *mm_realloc(void *ptr, size_t size)
 {
-    void *oldptr = ptr;
-    void *newptr;
-    size_t copySize;
+    // void *oldptr = ptr;
+    // void *newptr;
+    // size_t copySize;
 
-    newptr = mm_malloc(size);
+    // newptr = mm_malloc(size);
+    // if (newptr == NULL)
+    //     return NULL;
+
+    // copySize = GET_SIZE(HDRP(oldptr));
+    // if (size < copySize)
+    //     copySize = size;
+    // memcpy(newptr, oldptr, copySize);
+    // mm_free(oldptr);
+    // return newptr;
+
+    size_t copySize = GET_SIZE(HDRP(ptr));
+    size_t needSize = size + 2*WSIZE; // 추가 요구 사이즈 + 새로 할당할 헤더와 푸터
+    // 현재 블록 사이즈가 요구 사이즈보다 이미 크다
+    if (copySize >= needSize)
+        return ptr;
+
+    // 다음 블록이 가용 블록이다
+    if(!GET_ALLOC(HDRP(NEXT_BLKP(ptr))))
+    {
+        // 제자리에서 재할당 하는 경우,
+        // 새로 할당될 헤더와 푸터를 신경쓸 필요는 없음
+        size_t sumSize = GET_SIZE(HDRP(NEXT_BLKP(ptr))) + copySize;
+        if(sumSize >= size)
+        {
+            arrageBlock(NEXT_BLKP(ptr));
+            PUT(HDRP(ptr),PACK(sumSize,1));
+            PUT(FTRP(ptr),PACK(sumSize,1));
+            return ptr;
+        }
+    }
+
+    void *newptr = mm_malloc(needSize);
     if (newptr == NULL)
         return NULL;
+    memcpy(newptr, ptr, copySize);
+    mm_free(ptr);
 
-    copySize = GET_SIZE(HDRP(oldptr));
-    if (size < copySize)
-        copySize = size;
-    memcpy(newptr, oldptr, copySize);
-    mm_free(oldptr);
     return newptr;
 }
