@@ -145,15 +145,32 @@ static void* find_fit(size_t asize)
 {
     /* next fit*/
     void * bp;
+    void* bestbp;
+    
+    size_t bFindPlace = 0;
+    size_t bestSize = -1;   // UINT_MAX
 
     for(bp = heap_listp; GET_SIZE(HDRP(bp)) > 0 ; bp = NEXT_BLKP(bp))
     {
         /* 헤더 확인하니 가용 상태, 해당 블록 사이즈가 asize보다 큼 */
         if(!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp))))
         {
-            return bp;
+            if(bestSize > GET_SIZE(HDRP(bp)))
+            {
+                bFindPlace = 1;
+                bestSize = GET_SIZE(HDRP(bp));
+                bestbp = bp;
+            }
+
+            if(bestSize == asize)
+            {
+                return bestbp;
+            }
         }
     }
+
+    if(bFindPlace != 0)
+        return bestbp;
 
     /* 할당 안됨 */
     return NULL;
