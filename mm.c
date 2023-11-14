@@ -58,7 +58,6 @@ static void* find_fit(size_t asize);
 static void place(void* bp, size_t asize);
 
 void* heap_listp = NULL;
-void* prev_bp = NULL;
 
 /* 
  * mm_init - initialize the malloc package.
@@ -74,7 +73,6 @@ int mm_init(void)
     PUT(heap_listp + (2*WSIZE),PACK(DSIZE,1));  /* 프롤로그 푸터 */
     PUT(heap_listp + (3*WSIZE),PACK(0,1));  /* 에필로그 헤더 */
     heap_listp += (2*WSIZE);
-    prev_bp = heap_listp;
 
     if(extend_heap(CHUNKSIZE/WSIZE) == NULL)
         return -1;
@@ -132,7 +130,6 @@ void *mm_malloc(size_t size)
     if((bp = find_fit(asize)) != NULL)
     {
         place(bp,asize);
-        prev_bp = bp;
         return bp;
     }
 
@@ -141,30 +138,19 @@ void *mm_malloc(size_t size)
         return NULL;
     
     place(bp,asize);
-    prev_bp = bp;
     return bp;
 }
 
 static void* find_fit(size_t asize)
 {
     /* next fit*/
-    void * bp = NEXT_BLKP(prev_bp);
+    void * bp;
 
-    for(; GET_SIZE(HDRP(bp)) > 0 ; bp = NEXT_BLKP(bp))
+    for(bp = heap_listp; GET_SIZE(HDRP(bp)) > 0 ; bp = NEXT_BLKP(bp))
     {
         /* 헤더 확인하니 가용 상태, 해당 블록 사이즈가 asize보다 큼 */
         if(!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp))))
         {
-            prev_bp = bp;
-            return bp;
-        }
-    }
-
-    for(bp = NEXT_BLKP(heap_listp); bp < prev_bp; bp = NEXT_BLKP(bp))
-    {
-        if(!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp))))
-        {
-            prev_bp = bp;
             return bp;
         }
     }
@@ -180,7 +166,6 @@ static void* find_fit(size_t asize)
 static void place(void* bp, size_t asize)
 {
     size_t csize = GET_SIZE(HDRP(bp));
-    //prev_bp = bp;
 
     if((csize - asize) >= (2*DSIZE))
     {
@@ -245,8 +230,6 @@ static void* coalesce(void* bp)
         bp = PREV_BLKP(bp); /* 이전 블록으로 bp를 옮긴다 */
     }
 
-    prev_bp = PREV_BLKP(bp);
-
     return bp;
 }
 
@@ -268,10 +251,6 @@ void *mm_realloc(void *ptr, size_t size)
         {
             PUT(HDRP(ptr),PACK(sumSize,1));
             PUT(FTRP(ptr),PACK(sumSize,1));
-            // 메모리를 재할당 하는 경우이므로
-            size = DSIZE * ((size + DSIZE + DSIZE - 1) / DSIZE);
-
-            place(ptr,size);
             return ptr;
         }
     }
