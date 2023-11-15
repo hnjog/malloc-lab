@@ -28,7 +28,7 @@ team_t team = {
 /* Basic constants and macros */
 #define WSIZE 4             /* WORD and header / footer size*/
 #define DSIZE 8             /* Double Word Size*/
-#define CHUNKSIZE (1 << 12) /* Extend heap by this amount (bytes) */
+#define CHUNKSIZE (1 << 12) /* Extend heap by this amount (bytes) */ //4100
 
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 
@@ -67,8 +67,6 @@ static void place(void *bp, size_t asize);
 static void arrageBlock(void *targetBp);
 static void headInsert(void *bp);
 static int getSizeIndex(size_t size);
-
-static void *reallocCoalesce(void* bp, size_t needSize);
 
 void *heap_listp = NULL;
 
@@ -349,27 +347,19 @@ void *mm_realloc(void *ptr, size_t size)
     if (copySize >= needSize)
         return ptr;
 
-    if (!GET_ALLOC(HDRP(NEXT_BLKP(ptr))))
+    if(!GET_ALLOC(HDRP(NEXT_BLKP(ptr))))
     {
         // 제자리에서 재할당 하는 경우,
         // 새로 할당될 헤더와 푸터를 신경쓸 필요는 없음
         size_t sumSize = GET_SIZE(HDRP(NEXT_BLKP(ptr))) + copySize;
-        if (sumSize >= size)
+        if(sumSize >= size)
         {
             arrageBlock(NEXT_BLKP(ptr));
-            PUT(HDRP(ptr), PACK(sumSize, 1));
-            PUT(FTRP(ptr), PACK(sumSize, 1));
+            PUT(HDRP(ptr),PACK(sumSize,1));
+            PUT(FTRP(ptr),PACK(sumSize,1));
             return ptr;
         }
     }
-
-    // 이전 블록이나 다음 블록이 가용 블록임
-    // if ((!GET_ALLOC(HDRP(NEXT_BLKP(ptr)))) || (!GET_ALLOC(HDRP(PREV_BLKP(ptr)))))
-    // {
-    //     void* bp = reallocCoalesce(ptr,size);
-    //     if(bp != NULL)
-    //         return bp;
-    // }
 
     void *newptr = mm_malloc(needSize);
     if (newptr == NULL)
@@ -378,65 +368,4 @@ void *mm_realloc(void *ptr, size_t size)
     mm_free(ptr);
 
     return newptr;
-}
-
-static void *reallocCoalesce(void* bp, size_t needSize)
-{
-    size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp))); // 이전 footer
-    size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
-    size_t copysize = GET_SIZE(HDRP(bp));
-    size_t sumSize = copysize;
-
-    if (prev_alloc && !next_alloc)
-    {
-        /* case 2 이전 블록은 할당되었고, 다음 블록은 가용상태 */
-        sumSize += GET_SIZE(HDRP(NEXT_BLKP(bp))); /* 다음 블록의 사이즈만큼 더함 (다음 헤더에서 가지고 온다) */
-        if(sumSize < needSize)
-            return NULL;
-
-        // 가용 상태인 다음 블록을 정리해준다
-        arrageBlock(NEXT_BLKP(bp));
-
-        PUT(HDRP(bp), PACK(sumSize, 1)); /*size | 0 은 size와 같음, 그러나 가독성과 통일성을 위해 사용*/
-        PUT(FTRP(bp), PACK(sumSize, 1));
-    }
-    else if (!prev_alloc && next_alloc)
-    {
-        /* case 3 이전 블록은 가용 상태, 다음 블록은 할당상태 */
-
-        sumSize += GET_SIZE(HDRP(PREV_BLKP(bp)));
-        if(sumSize < needSize)
-            return NULL;
-
-        arrageBlock(PREV_BLKP(bp));
-
-        PUT(FTRP(bp), PACK(sumSize, 1));
-        PUT(HDRP(PREV_BLKP(bp)), PACK(sumSize, 1));
-
-        // 이전 블록과 합쳤으므로 이전 블록의 블록 포인터로 옮긴다
-        void* oldbp = bp;
-        bp = PREV_BLKP(bp);
-        memcpy(bp,oldbp,copysize);
-    }
-    else if (!prev_alloc && !next_alloc)
-    {
-        sumSize += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));
-        if(sumSize < needSize)
-            return NULL;
-
-        arrageBlock(PREV_BLKP(bp));
-        arrageBlock(NEXT_BLKP(bp));
-
-        PUT(HDRP(PREV_BLKP(bp)), PACK(sumSize, 1));
-        PUT(FTRP(NEXT_BLKP(bp)), PACK(sumSize, 1));
-
-        void* oldbp = bp;
-        bp = PREV_BLKP(bp);
-        memcpy(bp,oldbp,copysize);
-    }
-
-    place(bp,needSize);
-    headInsert(bp);
-
-    return bp;
 }
